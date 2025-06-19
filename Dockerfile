@@ -1,31 +1,43 @@
 # Gunakan image Node.js
-FROM node:18-alpine
+FROM node:18
 
-# Install dependencies yang diperlukan
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++
+# Install Cloud SQL Proxy
+RUN curl -o cloud_sql_proxy https://dl.google.com/cloudsql/cloud_sql_proxy.linux.amd64 \
+    && chmod +x cloud_sql_proxy \
+    && mv cloud_sql_proxy /usr/local/bin/
 
 # Buat direktori kerja
 WORKDIR /app
 
-# Salin file package.json dan install dependency
+# Copy package files dan install dependencies
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install
 
 # Buat direktori uploads
-RUN mkdir -p uploads
+RUN mkdir -p uploads && chmod 755 uploads
 
-# Salin semua file ke container
+# Copy semua file
 COPY . .
+
+# Create startup script
+RUN echo '#!/bin/bash\n\
+# Start Cloud SQL Proxy in background jika menggunakan proxy\n\
+if [ -n "$INSTANCE_CONNECTION_NAME" ]; then\n\
+  echo "Starting Cloud SQL Proxy..."\n\
+  cloud_sql_proxy -instances=$INSTANCE_CONNECTION_NAME=tcp:5432 &\n\
+  sleep 5\n\
+fi\n\
+\n\
+# Start the Node.js application\n\
+exec node index.js' > /app/start.sh \
+    && chmod +x /app/start.sh
 
 # Set environment variables
 ENV NODE_ENV=production
 ENV PORT=8080
 
-# Port default Cloud Run
+# Expose port
 EXPOSE 8080
 
-# Jalankan server
-CMD ["node", "index.js"]
+# Run the startup script
+CMD ["/app/start.sh"]
